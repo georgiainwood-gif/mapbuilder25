@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Translink MapBuilder</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        body { font-family: 'Open Sans', sans-serif; display: flex; gap: 20px; padding: 20px; background: #f3f4f6; margin: 0; }
+        .form-panel { width: 35%; background: white; padding: 20px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; gap: 12px; height: 90vh; overflow-y: auto; }
+        .map-panel { width: 65%; display: flex; flex-direction: column; gap: 10px; height: 90vh; position: relative; }
+        #map-container { width: 100%; height: 500px; background: #eee; border: 1px solid #ccc; border-radius: 4px; flex-grow: 1; }
+        #pac-input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        label { font-weight: 600; font-size: 13px; color: #333; }
+        input[type="text"], select, textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: inherit; }
+        textarea.code-output { font-family: monospace; font-size: 12px; background: #2d2d2d; color: #f8f8f2; height: 300px; resize: vertical; padding: 15px; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        
+        .lookup-box { background: #eef5f9; padding: 15px; border-radius: 4px; border: 1px solid #d0e3f0; }
+        .btn { padding: 8px 15px; background: #0056b3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        .btn:hover { background: #004494; }
+        .btn-generate { background: #28a745; width: 100%; padding: 15px; font-size: 16px; margin-top: 10px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background 0.2s; }
+        .btn-generate:hover { background: #218838; }
+        .btn-save { background: #17a2b8; } .btn-save:hover { background: #138496; }
+        .btn-load { background: #6c757d; } .btn-load:hover { background: #5a6268; }
+
+        .active-tags { background: white; padding: 15px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 10px; }
+        .tag-group { margin-bottom: 10px; }
+        .tag-group-title { display: flex; align-items: center; font-weight: bold; font-size: 14px; margin-bottom: 5px; }
+        .tag-group-title img { width: 20px; height: auto; margin-right: 8px; }
+        .tag-list { list-style-type: disc; margin: 0; padding-left: 30px; font-size: 13px; }
+        .tag-list li { margin-bottom: 3px; }
+        .remove-link { color: #0056b3; cursor: pointer; text-decoration: underline; margin-left: 8px; font-size: 12px; }
+        .remove-link:hover { color: #d9534f; }
+
+        .modal-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.7); display: flex; justify-content: center; align-items: center; z-index: 10; }
+        .modal-box { background: white; padding: 20px; border-radius: 5px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 350px; border: 1px solid #ccc; }
+        .modal-box h3 { margin-top: 0; font-size: 16px; margin-bottom: 15px; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px; }
+        .btn-cancel { background: #ccc; color: #333; }
+        .btn-cancel:hover { background: #bbb; }
+    </style>
+</head>
+<body>
+
+<div id="app" style="display: flex; width: 100%; gap: 20px;">
+    
+    <div class="form-panel">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2 style="margin: 0; font-size: 20px; color: #333;">Add MapBuilder</h2>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 5px;">
+            <button type="button" class="btn btn-save" style="flex: 1;" @click="exportProject">💾 Save Project</button>
+            <button type="button" class="btn btn-load" style="flex: 1;" @click="triggerImport">📂 Load Project</button>
+            <input type="file" id="importFile" style="display: none;" accept=".json" @change="importProject">
+        </div>
+        
+        <div class="form-group">
+            <label>Title <span style="color:red">*</span></label>
+            <input type="text" v-model="formData.title">
+        </div>
+
+        <div class="form-group">
+            <label>Map Legend heading</label>
+            <input type="text" v-model="formData.legendHeading">
+        </div>
+
+        <div class="form-group">
+            <label>Alt text</label>
+            <input type="text" v-model="formData.altText">
+        </div>
+
+        <div class="form-group">
+            <label>Image caption</label>
+            <input type="text" v-model="formData.caption">
+        </div>
+
+        <hr style="width: 100%; border: 0; border-top: 1px solid #eee;">
+
+        <div class="form-group lookup-box">
+            <label>Stop ID</label>
+            <div style="display: flex; gap: 8px;">
+                <input type="text" v-model="lookupId" placeholder="e.g. 000046" @keyup.enter="lookupStop">
+                <button type="button" class="btn" @click="lookupStop">Find</button>
+            </div>
+            <div v-if="lookupError" style="color: #d9534f; font-size: 12px; margin-top: 5px; font-weight: 600;">{{ lookupError }}</div>
+        </div>
+
+        <div class="form-group" style="display:flex; flex-direction:row; gap: 10px; margin-top: 10px;">
+            <div style="flex:1"><label>Center Lat</label><input type="text" readonly :value="formData.lat"></div>
+            <div style="flex:1"><label>Center Lng</label><input type="text" readonly :value="formData.lng"></div>
+            <div style="flex:1"><label>Zoom</label><input type="text" readonly :value="formData.zoom"></div>
+        </div>
+
+        <button type="button" class="btn btn-generate" @click="generateOutputs">Generate Code Output</button>
+    </div>
+
+    <div class="map-panel">
+        <input id="pac-input" type="text" placeholder="Search Google Maps...">
+        
+        <div class="active-tags" v-if="markers.length > 0">
+            <div class="tag-group" v-for="(group, iconName) in groupedMarkers" :key="iconName">
+                <div class="tag-group-title">
+                    <img :src="group.iconPath" :alt="iconName"> {{ iconName }}
+                </div>
+                <ul class="tag-list">
+                    <li v-for="(marker, index) in group.items" :key="marker.id">
+                        {{ marker.title }} 
+                        <a class="remove-link" @click="removeMarker(marker.id)">Remove</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        
+        <div id="map-container"></div>
+
+        <div class="form-group" style="margin-top: 10px;">
+            <label>Combined Drupal Code (Ready to Copy)</label>
+            <textarea class="code-output" readonly :value="outputCode" placeholder="Click 'Generate Code Output' to see the final code..."></textarea>
+        </div>
+
+        <div class="modal-overlay" v-if="showModal">
+            <div class="modal-box">
+                <h3>Configure Map Marker</h3>
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label>Icon</label>
+                    <select v-model="modalData.selectedIcon">
+                        <option v-for="icon in icons" :value="icon">{{ icon.name }}</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Title / Description</label>
+                    <input type="text" v-model="modalData.title" placeholder="e.g. Adelaide Street Stop 46">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-cancel" @click="cancelModal">Cancel</button>
+                    <button type="button" class="btn" @click="saveModal">Save</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBTP8rsGcBe5iexJiJt1o4uMinDugYiJeY&libraries=places&callback=initMap" async defer></script>
+<script src="stopsData.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
